@@ -132,6 +132,20 @@
     font-size: 0.9rem;
   }
 
+  button.nav.accent {
+    background: transparent;
+    border: 1px solid var(--kick-green);
+    color: var(--kick-green);
+  }
+  button.nav.accent:hover { background: rgba(83, 252, 24, 0.1); }
+
+  .page-field button.share-btn {
+    background: transparent;
+    border: 1px solid var(--kick-green);
+    color: var(--kick-green);
+  }
+  .page-field button.share-btn:hover { background: rgba(83, 252, 24, 0.1); }
+
   .grid {
     max-width: 1100px;
     margin: 0 auto;
@@ -149,6 +163,11 @@
     align-items: center;
     gap: 6px;
   }
+  .tile .img-wrap {
+    position: relative;
+    width: 64px;
+    height: 64px;
+  }
   .tile img {
     width: 64px;
     height: 64px;
@@ -156,6 +175,7 @@
     image-rendering: pixelated;
     background: #0e0e10;
     border-radius: 6px;
+    cursor: pointer;
   }
   .tile .id {
     font-family: "SF Mono", Menlo, Consolas, monospace;
@@ -164,6 +184,84 @@
   }
   .tile.broken img { opacity: 0.15; }
   .tile.broken .id { color: #5a3030; }
+
+  .copy-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(83, 252, 24, 0.92);
+    color: #0e0e10;
+    font-size: 0.62rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    border-radius: 6px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+  }
+  .copy-overlay.show {
+    opacity: 1;
+  }
+
+  #toast {
+    position: fixed;
+    left: 50%;
+    bottom: 28px;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--kick-green);
+    color: #0e0e10;
+    font-weight: 600;
+    font-size: 0.85rem;
+    padding: 10px 20px;
+    border-radius: 999px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    z-index: 999;
+  }
+  #toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  #zoomOverlay {
+    position: fixed;
+    z-index: 1000;
+    background: var(--panel);
+    border: 2px solid var(--kick-green);
+    border-radius: 12px;
+    padding: 10px;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.55);
+    opacity: 0;
+    transform: scale(0.85);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+  }
+  #zoomOverlay.show {
+    display: flex;
+    opacity: 1;
+    transform: scale(1);
+  }
+  #zoomOverlay img {
+    width: 192px;
+    height: 192px;
+    object-fit: contain;
+    image-rendering: pixelated;
+    background: #0e0e10;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  #zoomOverlay .id {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+  }
 </style>
 </head>
 <body>
@@ -179,6 +277,7 @@
 </div>
 
 <div class="controls" id="browseControls">
+  <button class="nav accent" id="randomPageBtn" onclick="jumpToRandomPage()">Random page</button>
   <button class="nav" id="backBtn" onclick="changePage(-1)">&larr; Back 50</button>
   <span class="range-label" id="rangeLabel">1 &ndash; 50</span>
   <button class="nav" id="forwardBtn" onclick="changePage(1)">Forward 50 &rarr;</button>
@@ -186,6 +285,7 @@
     <label for="pageInput">Page #</label>
     <input type="number" id="pageInput" min="1" value="1">
     <button onclick="goToPage()">Go</button>
+    <button class="share-btn" onclick="sharePage()">Share</button>
   </div>
 </div>
 
@@ -194,6 +294,11 @@
 </div>
 
 <div class="grid" id="grid"></div>
+<div id="toast"></div>
+<div id="zoomOverlay">
+  <img id="zoomImg" src="" alt="">
+  <div class="id" id="zoomId"></div>
+</div>
 
 <script>
   const MAX_ID = 6000000;
@@ -201,18 +306,129 @@
   let mode = 'browse';
   let currentPage = 1;
 
+  const MAX_PAGE = Math.floor(MAX_ID / PAGE_SIZE);
+
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text);
+    }
+    // fallback for non-secure contexts / older browsers
+    return new Promise((resolve, reject) => {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      try {
+        document.execCommand('copy');
+        resolve();
+      } catch (err) {
+        reject(err);
+      } finally {
+        document.body.removeChild(ta);
+      }
+    });
+  }
+
+  let toastTimer = null;
+  function showToast(message) {
+    const toast = document.getElementById('toast');
+    toast.textContent = message;
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 2000);
+  }
+
+  const ZOOM_SIZE = 192;
+  const HOVER_DELAY = 500;
+  const zoomOverlay = document.getElementById('zoomOverlay');
+  const zoomImg = document.getElementById('zoomImg');
+  const zoomId = document.getElementById('zoomId');
+  let hideZoomTimer = null;
+
+  function positionZoom(rect) {
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    let left = centerX - ZOOM_SIZE / 2;
+    let top = centerY - ZOOM_SIZE / 2;
+    const margin = 8;
+    left = Math.max(margin, Math.min(left, window.innerWidth - ZOOM_SIZE - margin));
+    top = Math.max(margin, Math.min(top, window.innerHeight - ZOOM_SIZE - 40 - margin));
+    zoomOverlay.style.left = `${left}px`;
+    zoomOverlay.style.top = `${top}px`;
+  }
+
+  function showZoom(url, id, rect) {
+    clearTimeout(hideZoomTimer);
+    zoomImg.src = url;
+    zoomImg.alt = `Emote ${id}`;
+    zoomId.textContent = id;
+    positionZoom(rect);
+    zoomOverlay.classList.add('show');
+  }
+
+  function scheduleHideZoom() {
+    clearTimeout(hideZoomTimer);
+    hideZoomTimer = setTimeout(() => zoomOverlay.classList.remove('show'), 80);
+  }
+
+  zoomOverlay.addEventListener('mouseenter', () => clearTimeout(hideZoomTimer));
+  zoomOverlay.addEventListener('mouseleave', scheduleHideZoom);
+  zoomImg.addEventListener('click', () => {
+    copyText(zoomImg.src).then(() => showToast('Image URL copied to clipboard'))
+      .catch(() => showToast('Could not copy image URL'));
+  });
+
   function emoteTile(id) {
     const tile = document.createElement('div');
     tile.className = 'tile';
+
+    const wrap = document.createElement('div');
+    wrap.className = 'img-wrap';
+
+    const url = `https://files.kick.com/emotes/${id}/fullsize`;
     const img = document.createElement('img');
-    img.src = `https://files.kick.com/emotes/${id}/fullsize`;
+    img.src = url;
     img.alt = `Emote ${id}`;
     img.loading = 'lazy';
     img.onerror = () => tile.classList.add('broken');
+
+    const overlay = document.createElement('div');
+    overlay.className = 'copy-overlay';
+    overlay.textContent = 'Copied!';
+
+    img.addEventListener('click', () => {
+      copyText(url).then(() => {
+        overlay.classList.add('show');
+        setTimeout(() => overlay.classList.remove('show'), 2000);
+        showToast('Image URL copied to clipboard');
+      }).catch(() => {
+        showToast('Could not copy image URL');
+      });
+    });
+
+    let hoverTimer = null;
+    img.addEventListener('mouseenter', () => {
+      clearTimeout(hoverTimer);
+      hoverTimer = setTimeout(() => {
+        showZoom(url, id, img.getBoundingClientRect());
+      }, HOVER_DELAY);
+    });
+    img.addEventListener('mouseleave', () => {
+      clearTimeout(hoverTimer);
+      scheduleHideZoom();
+    });
+
+    wrap.appendChild(img);
+    wrap.appendChild(overlay);
+
     const label = document.createElement('div');
     label.className = 'id';
     label.textContent = id;
-    tile.appendChild(img);
+
+    tile.appendChild(wrap);
     tile.appendChild(label);
     return tile;
   }
@@ -223,12 +439,17 @@
     ids.forEach(id => grid.appendChild(emoteTile(id)));
   }
 
+  function updateHash() {
+    history.replaceState(null, '', `#page=${currentPage}`);
+  }
+
   function renderBrowse() {
     const start = (currentPage - 1) * PAGE_SIZE + 1;
     const end = currentPage * PAGE_SIZE;
     document.getElementById('rangeLabel').textContent = `${start} \u2013 ${end}`;
     document.getElementById('pageInput').value = currentPage;
     document.getElementById('backBtn').disabled = currentPage <= 1;
+    updateHash();
     const ids = [];
     for (let i = start; i <= end; i++) ids.push(i);
     renderGrid(ids);
@@ -243,6 +464,29 @@
     const val = parseInt(document.getElementById('pageInput').value, 10);
     currentPage = Math.max(1, isNaN(val) ? 1 : val);
     renderBrowse();
+  }
+
+  function jumpToRandomPage() {
+    currentPage = Math.floor(Math.random() * MAX_PAGE) + 1;
+    renderBrowse();
+  }
+
+  function sharePage() {
+    const url = `${location.origin}${location.pathname}#page=${currentPage}`;
+    copyText(url).then(() => {
+      showToast('Link to this page copied to clipboard');
+    }).catch(() => {
+      showToast('Could not copy link');
+    });
+  }
+
+  function pageFromHash() {
+    const match = location.hash.match(/page=(\d+)/);
+    if (match) {
+      const val = parseInt(match[1], 10);
+      if (!isNaN(val) && val >= 1) return val;
+    }
+    return null;
   }
 
   function renderRandom() {
@@ -264,8 +508,28 @@
     else renderRandom();
   }
 
-  // initial render
+  let pageInputTimer = null;
+  document.getElementById('pageInput').addEventListener('input', () => {
+    clearTimeout(pageInputTimer);
+    pageInputTimer = setTimeout(() => {
+      goToPage();
+    }, 250);
+  });
+
+  // initial render: honor #page={num} in the URL if present
+  const hashPage = pageFromHash();
+  if (hashPage) currentPage = hashPage;
   renderBrowse();
+
+  // keep in sync if the hash changes while the page is open (e.g. back/forward, manual edit)
+  window.addEventListener('hashchange', () => {
+    const p = pageFromHash();
+    if (p && p !== currentPage) {
+      currentPage = p;
+      if (mode !== 'browse') switchMode('browse');
+      else renderBrowse();
+    }
+  });
 </script>
 
 </body>
