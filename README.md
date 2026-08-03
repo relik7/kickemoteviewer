@@ -3,10 +3,10 @@
 **Access online** at [`https://relik7.github.io/kickemoteviewer/`](https://relik7.github.io/kickemoteviewer/)
 
 
-This single HTML file lets you view all kick emotes in pagess of 50.
+This single HTML file lets you view all kick emotes in pages of 50.
 You can view sequential pages, random pages, or a totally random slate from the entire archive.
 Many of these emotes are no longer in use on channels but they remain on the Kick server.
-Currently about 118,000 pages (about 5.9 million) emotes are available.  Very few have ever been deleted.
+Currently about 118,000 pages (about 5.9 million) of emotes are available.  Very few have ever been deleted.
 
 Clicking on an emote copies the URL to your clipboard.  Hovering magnifies it.  You can share a whole page to someone with the Share Entire Page button.
 
